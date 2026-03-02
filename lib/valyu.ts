@@ -939,7 +939,7 @@ export function getMilitaryBases(): MilitaryBase[] {
     // ===== AFRICA - NORTH =====
     { country: "Egypt", baseName: "Cairo West Air Base", latitude: 30.1164, longitude: 30.9153, type: "usa" },
     { country: "Egypt", baseName: "Borg El Arab Airport", latitude: 30.9177, longitude: 29.6964, type: "usa" },
-    { country: "Tunisia", baseName: "Sidi Ahmed Air Base", latitude: 37.2453, longitude: 9.7944, type: "usa" },
+    // { country: "Tunisia", baseName: "Sidi Ahmed Air Base", latitude: 37.2453, longitude: 9.7944, type: "usa" },
     { country: "Morocco", baseName: "Tan-Tan Air Base", latitude: 28.4482, longitude: -11.1613, type: "usa" },
     { country: "Libya", baseName: "Misrata Air Base", latitude: 32.3250, longitude: 15.0611, type: "usa" },
 
