@@ -84,9 +84,9 @@ async function searchEventsFree(
 
     const filtered = startDateTime
       ? parsed.filter((item) => {
-          if (!item.publishedDate) return true;
-          return new Date(item.publishedDate).getTime() >= startDateTime;
-        })
+        if (!item.publishedDate) return true;
+        return new Date(item.publishedDate).getTime() >= startDateTime;
+      })
       : parsed;
 
     return filtered.slice(0, maxResults);
