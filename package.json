@@ -12,13 +12,12 @@
     "threat-intelligence",
     "osint",
     "geopolitical",
-    "mapbox",
+    "openstreetmap",
     "valyu"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@mapbox/mapbox-gl-geocoder": "^5.1.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^25.0.10",
     "@types/react": "^19.2.9",
@@ -30,7 +29,7 @@
     "eslint-config-next": "^16.1.4",
     "geist": "^1.5.1",
     "lucide-react": "^0.562.0",
-    "mapbox-gl": "^3.18.0",
+    "maplibre-gl": "^5.9.0",
     "next": "^16.1.4",
     "openai": "^6.16.0",
     "postcss": "^8.5.6",

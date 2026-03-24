@@ -1,28 +1,47 @@
 "use client";
 
+import { SignInModal } from "@/components/auth/sign-in-modal";
+import { useAuthStore } from "@/stores/auth-store";
+import { useEventsStore } from "@/stores/events-store";
+import { useMapStore } from "@/stores/map-store";
+import { threatLevelColors } from "@/types";
+import type { GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, {
-  NavigationControl,
   GeolocateControl,
+  Layer,
+  NavigationControl,
+  Popup,
   ScaleControl,
   Source,
-  Layer,
-  Popup,
-  type MapRef,
-  type MapMouseEvent,
   type LayerProps,
-} from "react-map-gl/mapbox";
-import { useMapStore } from "@/stores/map-store";
-import { useEventsStore } from "@/stores/events-store";
-import { useAuthStore } from "@/stores/auth-store";
-import { threatLevelColors } from "@/types";
-import { EventPopup } from "./event-popup";
+  type MapMouseEvent,
+  type MapRef,
+} from "react-map-gl/maplibre";
 import { CountryConflictsModal } from "./country-conflicts-modal";
-import { SignInModal } from "@/components/auth/sign-in-modal";
+import { EventPopup } from "./event-popup";
 
 const APP_MODE = process.env.NEXT_PUBLIC_APP_MODE || "self-hosted";
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+const OSM_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    "osm-tiles": {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap contributors",
+    },
+  },
+  layers: [
+    {
+      id: "osm-tiles-layer",
+      type: "raster",
+      source: "osm-tiles",
+    },
+  ],
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+};
 
 const clusterLayer: LayerProps = {
   id: "clusters",
@@ -646,7 +665,7 @@ export function ThreatMap() {
   const [selectedNuclearFacility, setSelectedNuclearFacility] = useState<SelectedNuclearFacility | null>(null);
   const [eventPopupCoords, setEventPopupCoords] = useState<{ longitude: number; latitude: number } | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [selectedCountryCode, setSelectedCountryCode] = useState<string | null>(null);
+  const [selectedCountryBoundary, setSelectedCountryBoundary] = useState<GeoJSON.Feature<GeoJSON.Geometry> | null>(null);
   const [isCountryLoading, setIsCountryLoading] = useState(false);
   const [blinkOpacity, setBlinkOpacity] = useState(0.4);
   const [showSignInModal, setShowSignInModal] = useState(false);
@@ -767,7 +786,7 @@ export function ThreatMap() {
 
   // Blinking effect for selected country while loading
   useEffect(() => {
-    if (!selectedCountryCode || !isCountryLoading) {
+    if (!selectedCountryBoundary || !isCountryLoading) {
       setBlinkOpacity(0.4);
       return;
     }
@@ -777,7 +796,7 @@ export function ThreatMap() {
     }, 400);
 
     return () => clearInterval(interval);
-  }, [selectedCountryCode, isCountryLoading]);
+  }, [selectedCountryBoundary, isCountryLoading]);
 
   const handleCountryLoadingChange = useCallback((loading: boolean) => {
     setIsCountryLoading(loading);
@@ -785,7 +804,7 @@ export function ThreatMap() {
 
   const handleCountryModalClose = useCallback(() => {
     setSelectedCountry(null);
-    setSelectedCountryCode(null);
+    setSelectedCountryBoundary(null);
     setIsCountryLoading(false);
   }, []);
 
@@ -1161,7 +1180,12 @@ export function ThreatMap() {
 
         if (layerId === "clusters" && mapRef.current) {
           const clusterId = feature.properties?.cluster_id;
-          const source = mapRef.current.getSource("events") as mapboxgl.GeoJSONSource;
+          const source = mapRef.current.getSource("events") as GeoJSONSource & {
+            getClusterExpansionZoom: (
+              clusterId: number,
+              callback: (error: Error | null, zoom: number) => void
+            ) => void;
+          };
 
           source.getClusterExpansionZoom(clusterId, (err, zoom) => {
             if (err) return;
@@ -1312,15 +1336,27 @@ export function ThreatMap() {
 
       try {
         const response = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=country&access_token=${MAPBOX_TOKEN}`
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&zoom=3&addressdetails=1`
         );
         const data = await response.json();
 
-        if (data.features && data.features.length > 0) {
-          const countryFeature = data.features[0];
-          const countryName = countryFeature.place_name;
-          // Get ISO 3166-1 alpha-2 country code from short_code property
-          const countryCode = countryFeature.properties?.short_code?.toUpperCase() || null;
+        const countryName: string | undefined = data?.address?.country;
+        const countryCode: string | undefined = data?.address?.country_code;
+
+        if (countryName) {
+          if (countryCode) {
+            const boundaryResponse = await fetch(
+              `https://nominatim.openstreetmap.org/search?countrycodes=${countryCode}&format=geojson&polygon_geojson=1&limit=1`
+            );
+            const boundaryData = await boundaryResponse.json();
+            if (boundaryData?.features?.length) {
+              setSelectedCountryBoundary(boundaryData.features[0]);
+            } else {
+              setSelectedCountryBoundary(null);
+            }
+          } else {
+            setSelectedCountryBoundary(null);
+          }
 
           // Always require sign-in for country clicks (answers about a place)
           if (requiresAuth && !isAuthenticated) {
@@ -1329,7 +1365,6 @@ export function ThreatMap() {
           }
 
           setSelectedCountry(countryName);
-          setSelectedCountryCode(countryCode);
           setIsCountryLoading(true);
         }
       } catch (error) {
@@ -1351,29 +1386,13 @@ export function ThreatMap() {
     }
   }, []);
 
-  if (!MAPBOX_TOKEN) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-card">
-        <div className="text-center">
-          <p className="text-lg font-semibold text-foreground">
-            Mapbox Token Required
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Please add NEXT_PUBLIC_MAPBOX_TOKEN to your .env.local file
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <Map
       ref={mapRef}
       {...viewport}
       onMove={(evt) => setViewport(evt.viewState)}
       onLoad={handleMapLoad}
-      mapStyle="mapbox://styles/mapbox/dark-v11"
-      mapboxAccessToken={MAPBOX_TOKEN}
+      mapStyle={OSM_STYLE}
       interactiveLayerIds={[
         ...(showClusters ? ["clusters"] : []),
         "unclustered-point",
@@ -1401,47 +1420,32 @@ export function ThreatMap() {
           paint={{
             "fill-color": "rgba(0,0,0,0.25)",
           }}
-          beforeId="waterway-label"
         />
       </Source>
 
       {/* Country highlight layer */}
-      {selectedCountryCode && (
+      {selectedCountryBoundary && (
         <Source
-          id="country-boundaries"
-          type="vector"
-          url="mapbox://mapbox.country-boundaries-v1"
+          id="country-boundary"
+          type="geojson"
+          data={selectedCountryBoundary}
         >
           <Layer
             id="country-highlight"
             type="fill"
-            source-layer="country_boundaries"
-            filter={[
-              "all",
-              ["==", ["get", "iso_3166_1"], selectedCountryCode],
-              ["==", ["get", "worldview"], "all"],
-            ]}
             paint={{
               "fill-color": "#ef4444",
               "fill-opacity": blinkOpacity,
             }}
-            beforeId="waterway-label"
           />
           <Layer
             id="country-highlight-outline"
             type="line"
-            source-layer="country_boundaries"
-            filter={[
-              "all",
-              ["==", ["get", "iso_3166_1"], selectedCountryCode],
-              ["==", ["get", "worldview"], "all"],
-            ]}
             paint={{
               "line-color": "#ef4444",
               "line-width": 2,
               "line-opacity": 0.8,
             }}
-            beforeId="waterway-label"
           />
         </Source>
       )}
@@ -1582,24 +1586,24 @@ export function ThreatMap() {
                 <span>{selectedEntityLocation.placeName}</span>
               </div>
               {selectedEntityLocation.country &&
-               selectedEntityLocation.country !== selectedEntityLocation.placeName && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <svg
-                    className="h-3 w-3 shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>{selectedEntityLocation.country}</span>
-                </div>
-              )}
+                selectedEntityLocation.country !== selectedEntityLocation.placeName && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <svg
+                      className="h-3 w-3 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span>{selectedEntityLocation.country}</span>
+                  </div>
+                )}
             </div>
           </div>
         </Popup>
@@ -1618,18 +1622,16 @@ export function ThreatMap() {
           <div className="min-w-[220px] p-2">
             <div className="mb-2 flex items-center gap-2">
               <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full ${
-                  selectedMilitaryBase.type === "usa"
+                className={`flex h-8 w-8 items-center justify-center rounded-full ${selectedMilitaryBase.type === "usa"
                     ? "bg-green-500/20"
                     : "bg-blue-500/20"
-                }`}
+                  }`}
               >
                 <svg
-                  className={`h-4 w-4 ${
-                    selectedMilitaryBase.type === "usa"
+                  className={`h-4 w-4 ${selectedMilitaryBase.type === "usa"
                       ? "text-green-400"
                       : "text-blue-400"
-                  }`}
+                    }`}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1647,11 +1649,10 @@ export function ThreatMap() {
                   {selectedMilitaryBase.baseName}
                 </h3>
                 <span
-                  className={`text-xs ${
-                    selectedMilitaryBase.type === "usa"
+                  className={`text-xs ${selectedMilitaryBase.type === "usa"
                       ? "text-green-400"
                       : "text-blue-400"
-                  }`}
+                    }`}
                 >
                   {selectedMilitaryBase.type === "usa" ? "US Military Base" : "NATO Base"}
                 </span>
@@ -1701,9 +1702,8 @@ export function ThreatMap() {
                 <h3 className="text-sm font-semibold text-foreground">
                   Fire Detection
                 </h3>
-                <span className={`text-xs ${
-                  selectedFire.confidence === "high" ? "text-red-400" : "text-orange-400"
-                }`}>
+                <span className={`text-xs ${selectedFire.confidence === "high" ? "text-red-400" : "text-orange-400"
+                  }`}>
                   {selectedFire.confidence} confidence - {selectedFire.region}
                 </span>
               </div>
@@ -1754,10 +1754,9 @@ export function ThreatMap() {
                 <h3 className="text-sm font-bold text-foreground font-mono">
                   {selectedFlight.callsign}
                 </h3>
-                <span className={`text-xs ${
-                  selectedFlight.confidence === "high" ? "text-sky-400" :
-                  selectedFlight.confidence === "medium" ? "text-yellow-400" : "text-slate-400"
-                }`}>
+                <span className={`text-xs ${selectedFlight.confidence === "high" ? "text-sky-400" :
+                    selectedFlight.confidence === "medium" ? "text-yellow-400" : "text-slate-400"
+                  }`}>
                   {selectedFlight.aircraftType !== "unknown" ? selectedFlight.aircraftType.toUpperCase() : "Military"} - {selectedFlight.originCountry}
                 </span>
               </div>
@@ -1786,19 +1785,17 @@ export function ThreatMap() {
               {selectedFlight.squawk && (
                 <div className="flex justify-between">
                   <span>Squawk</span>
-                  <span className={`font-medium font-mono ${
-                    ["7700", "7600", "7500", "7777"].includes(selectedFlight.squawk)
+                  <span className={`font-medium font-mono ${["7700", "7600", "7500", "7777"].includes(selectedFlight.squawk)
                       ? "text-red-400"
                       : "text-foreground"
-                  }`}>{selectedFlight.squawk}</span>
+                    }`}>{selectedFlight.squawk}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span>Confidence</span>
-                <span className={`font-medium ${
-                  selectedFlight.confidence === "high" ? "text-sky-400" :
-                  selectedFlight.confidence === "medium" ? "text-yellow-400" : "text-slate-400"
-                }`}>{selectedFlight.confidence}</span>
+                <span className={`font-medium ${selectedFlight.confidence === "high" ? "text-sky-400" :
+                    selectedFlight.confidence === "medium" ? "text-yellow-400" : "text-slate-400"
+                  }`}>{selectedFlight.confidence}</span>
               </div>
               <div className="flex justify-between">
                 <span>Region</span>
@@ -1937,12 +1934,11 @@ export function ThreatMap() {
               <div className="space-y-1 text-xs text-muted-foreground">
                 <div className="flex justify-between">
                   <span>Status</span>
-                  <span className={`font-medium capitalize ${
-                    selectedNuclearFacility.status === "active" ? "text-green-400" :
-                    selectedNuclearFacility.status === "under_construction" ? "text-yellow-400" :
-                    selectedNuclearFacility.status === "suspected" ? "text-red-400" :
-                    "text-slate-400"
-                  }`}>
+                  <span className={`font-medium capitalize ${selectedNuclearFacility.status === "active" ? "text-green-400" :
+                      selectedNuclearFacility.status === "under_construction" ? "text-yellow-400" :
+                        selectedNuclearFacility.status === "suspected" ? "text-red-400" :
+                          "text-slate-400"
+                    }`}>
                     {selectedNuclearFacility.status.replace(/_/g, " ")}
                   </span>
                 </div>

@@ -167,11 +167,13 @@ body {
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
-/* Mapbox overrides for dark theme */
+/* MapLibre/OpenStreetMap popup and control overrides for dark theme */
+.maplibregl-popup,
 .mapboxgl-popup {
   max-width: 320px !important;
 }
 
+.maplibregl-popup-content,
 .mapboxgl-popup-content {
   background-color: var(--color-card) !important;
   color: var(--color-card-foreground) !important;
@@ -183,37 +185,45 @@ body {
   max-width: 320px !important;
 }
 
+.maplibregl-popup-close-button,
 .mapboxgl-popup-close-button {
   color: var(--color-foreground) !important;
   font-size: 18px !important;
   padding: 4px 8px !important;
 }
 
+.maplibregl-popup-close-button:hover,
 .mapboxgl-popup-close-button:hover {
   background-color: var(--color-muted) !important;
 }
 
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
 .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {
   border-top-color: var(--color-card) !important;
 }
 
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
 .mapboxgl-popup-anchor-top .mapboxgl-popup-tip {
   border-bottom-color: var(--color-card) !important;
 }
 
+.maplibregl-popup-anchor-left .maplibregl-popup-tip,
 .mapboxgl-popup-anchor-left .mapboxgl-popup-tip {
   border-right-color: var(--color-card) !important;
 }
 
+.maplibregl-popup-anchor-right .maplibregl-popup-tip,
 .mapboxgl-popup-anchor-right .mapboxgl-popup-tip {
   border-left-color: var(--color-card) !important;
 }
 
+.maplibregl-ctrl-group,
 .mapboxgl-ctrl-group {
   background-color: var(--color-card) !important;
   border-color: var(--color-border) !important;
 }
 
+.maplibregl-ctrl-group button,
 .mapboxgl-ctrl-group button {
   color: var(--color-foreground) !important;
 }
@@ -243,6 +253,7 @@ body {
     opacity: 0;
     transform: translateX(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -255,10 +266,13 @@ body {
 
 /* Pulse animation for critical threats */
 @keyframes pulse-threat {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.7;
     transform: scale(1.1);

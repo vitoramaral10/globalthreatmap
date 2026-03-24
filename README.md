@@ -17,7 +17,7 @@ A real-time global situational awareness platform that plots security events, ge
 ### Core Features
 
 - **Real-Time Event Mapping** - Plot breaking news events (conflicts, protests, natural disasters) on a world map with color-coded threat levels
-- **Interactive Mapbox Map** - Dark-themed map with clustering, heatmap visualization, and smooth navigation
+- **Interactive OpenStreetMap Map** - Dark-themed map with clustering, heatmap visualization, and smooth navigation
 - **Event Feed** - Real-time filterable feed of global events with category and threat level filters
 - **Intel Dossiers** - Build intelligence dossiers on any actor with deep research reports, CSV data exports, and PowerPoint briefings
 - **Alert System** - Configure keyword and region-based alerts with real-time notifications
@@ -52,7 +52,7 @@ Visualize global military presence:
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
-- **Map**: Mapbox GL JS + react-map-gl
+- **Map**: MapLibre GL + OpenStreetMap + react-map-gl
 - **UI**: Tailwind CSS v4 + custom components
 - **Intelligence API**: valyu-js (search, answer, deep research)
 - **Schema Validation**: zod
@@ -64,7 +64,6 @@ Visualize global military presence:
 ### Prerequisites
 
 - Node.js 18+
-- Mapbox account and API token
 - Valyu API key
 
 ### Installation
@@ -78,7 +77,6 @@ npm install
 2. Create a `.env.local` file in the root directory:
 
 ```env
-NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token_here
 VALYU_API_KEY=your_valyu_api_key_here
 NEXT_PUBLIC_APP_MODE=self-hosted
 
@@ -87,7 +85,6 @@ OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 3. Get your API keys:
-   - **Mapbox**: [Get a token](https://account.mapbox.com/access-tokens/)
    - **Valyu**: [Get an API key](https://valyu.ai)
    - **OpenAI** (optional): [Get an API key](https://platform.openai.com/api-keys) - enables AI-powered location extraction
 

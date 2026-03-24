@@ -1,7 +1,6 @@
 import type { GeoLocation } from "@/types";
 import OpenAI from "openai";
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Use the cheapest model available - gpt-4.1-nano at $0.02/1M input, $0.15/1M output
@@ -131,7 +130,7 @@ const LOCATION_PATTERNS = [
   /\bthe\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+(?:government|president|prime\s+minister|administration|military|army)\b/gi,
 ];
 
-// In-memory cache for geocoding results (avoids repeated Mapbox API calls)
+// In-memory cache for geocoding results (avoids repeated Nominatim API calls)
 const geocodeCache = new Map<string, GeoLocation | null>();
 
 // Extended known locations with more cities and regions
@@ -423,7 +422,7 @@ function lookupKnownLocation(name: string): GeoLocation | null {
 /**
  * Geocode a location name to coordinates.
  * Handles compound queries like "Kyiv, Kyiv Oblast, Ukraine" by trying each
- * comma-separated component against KNOWN_LOCATIONS before hitting Mapbox.
+ * comma-separated component against KNOWN_LOCATIONS before hitting Nominatim.
  * Results are cached in-memory to avoid duplicate API calls.
  */
 export async function geocodeLocation(
@@ -454,16 +453,17 @@ export async function geocodeLocation(
     }
   }
 
-  // Fall back to Mapbox geocoding
-  if (!MAPBOX_TOKEN) {
-    console.warn("Mapbox token not available for geocoding");
-    geocodeCache.set(placeName, null);
-    return null;
-  }
+  // Fall back to OpenStreetMap Nominatim geocoding
 
   try {
     const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(placeName)}.json?access_token=${MAPBOX_TOKEN}&limit=1&types=place,region,country`
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(placeName)}`,
+      {
+        headers: {
+          "User-Agent": "GlobalThreatMap/1.0",
+          Accept: "application/json",
+        },
+      }
     );
 
     if (!response.ok) {
@@ -472,31 +472,25 @@ export async function geocodeLocation(
 
     const data = await response.json();
 
-    if (data.features && data.features.length > 0) {
-      const feature = data.features[0];
-      const [longitude, latitude] = feature.center;
+    if (Array.isArray(data) && data.length > 0) {
+      const feature = data[0];
+      const longitude = Number(feature.lon);
+      const latitude = Number(feature.lat);
 
-      let country: string | undefined;
-      if (feature.context) {
-        const countryContext = feature.context.find((c: { id: string }) =>
-          c.id.startsWith("country")
-        );
-        if (countryContext) {
-          country = countryContext.text;
-        }
-      }
-
-      // If the feature itself is a country
-      if (!country && feature.place_type?.includes("country")) {
-        country = feature.text;
-      }
+      const country: string | undefined = feature.address?.country;
+      const region: string | undefined =
+        feature.address?.state || feature.address?.region || feature.address?.county;
+      const primaryName =
+        typeof feature.display_name === "string"
+          ? feature.display_name.split(",")[0]?.trim()
+          : placeName;
 
       const result: GeoLocation = {
         latitude,
         longitude,
-        placeName: feature.text || placeName,
+        placeName: primaryName || placeName,
         country,
-        region: feature.region,
+        region,
       };
       geocodeCache.set(placeName, result);
       return result;
