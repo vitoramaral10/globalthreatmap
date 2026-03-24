@@ -64,7 +64,7 @@ Visualize global military presence:
 ### Prerequisites
 
 - Node.js 18+
-- Valyu API key
+- Valyu API key (optional)
 
 ### Installation
 
@@ -77,15 +77,17 @@ npm install
 2. Create a `.env.local` file in the root directory:
 
 ```env
-VALYU_API_KEY=your_valyu_api_key_here
 NEXT_PUBLIC_APP_MODE=self-hosted
 
 # Optional: Enable AI-powered location extraction for better accuracy
 OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional: enable premium Valyu features (deep research and richer synthesis)
+# VALYU_API_KEY=your_valyu_api_key_here
 ```
 
 3. Get your API keys:
-   - **Valyu**: [Get an API key](https://valyu.ai)
+    - **Valyu** (optional): [Get an API key](https://valyu.ai)
    - **OpenAI** (optional): [Get an API key](https://platform.openai.com/api-keys) - enables AI-powered location extraction
 
 4. Run the development server:

@@ -17,6 +17,122 @@ function getValyuClient(): Valyu {
   return valyuInstance;
 }
 
+function isValyuConfigured(): boolean {
+  return Boolean(process.env.VALYU_API_KEY?.trim());
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+function stripHtml(value: string): string {
+  return decodeHtmlEntities(value.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+function extractXmlTag(xml: string, tag: string): string {
+  const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "i"));
+  return match?.[1]?.trim() || "";
+}
+
+async function searchEventsFree(
+  query: string,
+  maxResults: number,
+  startDate?: string
+): Promise<Array<{ title: string; url: string; content: string; publishedDate?: string; source?: string }>> {
+  try {
+    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+    const response = await fetch(rssUrl, {
+      headers: {
+        "User-Agent": "GlobalThreatMap/1.0",
+        Accept: "application/rss+xml, application/xml, text/xml",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const xml = await response.text();
+    const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map((m) => m[1]);
+    const startDateTime = startDate ? new Date(startDate).getTime() : null;
+
+    const parsed = items
+      .map((itemXml) => {
+        const titleRaw = extractXmlTag(itemXml, "title");
+        const title = stripHtml(titleRaw.replace(/\s+-\s+[^-]+$/, ""));
+        const url = decodeHtmlEntities(extractXmlTag(itemXml, "link"));
+        const description = stripHtml(extractXmlTag(itemXml, "description"));
+        const published = extractXmlTag(itemXml, "pubDate");
+        const publishedDate = published ? new Date(published).toISOString() : undefined;
+        return {
+          title: title || "Untitled",
+          url,
+          content: description || title || "",
+          publishedDate,
+          source: "google-news-rss",
+        };
+      })
+      .filter((item) => item.url);
+
+    const filtered = startDateTime
+      ? parsed.filter((item) => {
+          if (!item.publishedDate) return true;
+          return new Date(item.publishedDate).getTime() >= startDateTime;
+        })
+      : parsed;
+
+    return filtered.slice(0, maxResults);
+  } catch (error) {
+    console.error("Free events search error:", error);
+    return [];
+  }
+}
+
+async function wikipediaSummary(topic: string): Promise<{ summary: string; sources: { title: string; url: string }[] } | null> {
+  try {
+    const response = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`,
+      {
+        headers: {
+          "User-Agent": "GlobalThreatMap/1.0",
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const summary = typeof data.extract === "string" ? data.extract : "";
+    const pageUrl = data?.content_urls?.desktop?.page;
+
+    if (!summary) {
+      return null;
+    }
+
+    return {
+      summary,
+      sources: pageUrl
+        ? [{ title: data.title || topic, url: String(pageUrl) }]
+        : [],
+    };
+  } catch (error) {
+    console.error("Wikipedia fallback error:", error);
+    return null;
+  }
+}
+
 interface ProxyResult {
   success: boolean;
   data?: any;
@@ -201,6 +317,15 @@ export async function searchEvents(
     };
   }
 
+  if (!isValyuConfigured()) {
+    const results = await searchEventsFree(
+      query,
+      options?.maxResults || 20,
+      options?.startDate
+    );
+    return { results };
+  }
+
   try {
     const valyu = getValyuClient();
     const response = await valyu.search(query, {
@@ -371,6 +496,23 @@ export async function getEntityResearch(entityName: string, options?: EntityOpti
     };
   }
 
+  if (!isValyuConfigured()) {
+    const wiki = await wikipediaSummary(entityName);
+    if (!wiki) {
+      return null;
+    }
+
+    const entityType = classifyEntityType(entityName, wiki.summary);
+    return {
+      name: entityName,
+      description: wiki.summary.slice(0, 1000),
+      type: entityType,
+      data: {
+        sources: wiki.sources,
+      },
+    };
+  }
+
   try {
     const valyu = getValyuClient();
     const response = await valyu.search(
@@ -480,6 +622,25 @@ Be thorough but concise. Focus on verified facts from reliable sources.`;
     return;
   }
 
+  if (!isValyuConfigured()) {
+    const entity = await getEntityResearch(entityName);
+    if (!entity) {
+      yield { type: "error", error: "Unable to retrieve entity information in free mode." };
+      return;
+    }
+
+    yield { type: "content", content: entity.description };
+    yield {
+      type: "sources",
+      sources: (entity.data?.sources || []).map((s: { title?: string; url?: string }) => ({
+        title: s.title || "Source",
+        url: s.url || "",
+      })),
+    };
+    yield { type: "done" };
+    return;
+  }
+
   // Self-hosted mode: use SDK with streaming
   const valyu = getValyuClient();
 
@@ -542,6 +703,11 @@ export async function searchEntityLocations(entityName: string, options?: Entity
     return response.results
       .map((r: any) => (typeof r.content === "string" ? r.content : ""))
       .join("\n\n");
+  }
+
+  if (!isValyuConfigured()) {
+    const wiki = await wikipediaSummary(entityName);
+    return wiki?.summary || "";
   }
 
   try {
@@ -685,6 +851,21 @@ export async function deepResearch(
   // Use OAuth proxy if accessToken is provided
   if (options?.accessToken) {
     return deepResearchViaProxy(topic, options.accessToken);
+  }
+
+  if (!isValyuConfigured()) {
+    const wiki = await wikipediaSummary(topic);
+    if (wiki) {
+      return {
+        summary: `${wiki.summary}\n\nFree mode note: advanced deep research deliverables (CSV/PPTX/PDF) require a Valyu API key.`,
+        sources: wiki.sources,
+      };
+    }
+
+    return {
+      summary: "Free mode is enabled and no premium research provider is configured. Add VALYU_API_KEY for full deep research.",
+      sources: [],
+    };
   }
 
   // Self-hosted mode: use API key directly
@@ -1215,6 +1396,23 @@ export async function getCountryConflicts(
     };
   }
 
+  if (!isValyuConfigured()) {
+    const wiki = await wikipediaSummary(country);
+    const baseText = wiki?.summary || `No free curated conflict profile available for ${country}.`;
+    const sources = wiki?.sources || [];
+
+    return {
+      past: {
+        answer: `${baseText}\n\nFree mode note: detailed historical conflict synthesis requires a configured research provider.`,
+        sources,
+      },
+      current: {
+        answer: `${baseText}\n\nFree mode note: detailed current conflict synthesis requires a configured research provider.`,
+        sources,
+      },
+    };
+  }
+
   // Self-hosted mode: use SDK directly
   const valyu = getValyuClient();
 
@@ -1327,6 +1525,16 @@ export async function* streamCountryConflicts(
         error: error instanceof Error ? error.message : "Unknown error occurred",
       };
     }
+    return;
+  }
+
+  if (!isValyuConfigured()) {
+    const conflicts = await getCountryConflicts(country);
+    yield { type: "current_content", content: conflicts.current.answer };
+    yield { type: "current_sources", sources: conflicts.current.sources };
+    yield { type: "past_content", content: conflicts.past.answer };
+    yield { type: "past_sources", sources: conflicts.past.sources };
+    yield { type: "done" };
     return;
   }
 
